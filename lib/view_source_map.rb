@@ -14,16 +14,19 @@ module ViewSourceMap
       def render_with_path_comment(context, options, block)
         content = render_without_path_comment(context, options, block)
         return content if ViewSourceMap.force_disabled?(options)
+        return content unless content.respond_to?(:template)
 
-        if @lookup_context.rendered_format == :html
+        if content.format == :html
           if options[:layout]
             name = "#{options[:layout]}(layout)"
           else
-            return content unless @template.respond_to?(:identifier)
-            path = Pathname.new(@template.identifier)
+
+            return content unless content.template.respond_to?(:identifier)
+            path = Pathname.new(content.template.identifier)
             name = path.relative_path_from(Rails.root)
           end
-          "<!-- BEGIN #{name} -->\n#{content}<!-- END #{name} -->".html_safe
+
+          build_rendered_template("<!-- BEGIN #{name} -->\n#{content.body}<!-- END #{name} -->".html_safe, content.template)
         else
           content
         end
@@ -33,17 +36,17 @@ module ViewSourceMap
     end
 
     ActionView::TemplateRenderer.class_eval do
-      def render_template_with_path_comment(template, layout_name = nil, locals = {})
-        view, locals = @view, locals || {}
+      def render_template_with_path_comment(view, template, layout_name = nil, locals = {})
+        locals ||= {}
 
-        render_with_layout(layout_name, locals) do |layout|
-          instrument(:template, :identifier => template.identifier, :layout => layout.try(:virtual_path)) do
+        render_with_layout(view, template, layout_name, locals) do |layout|
+          instrument(:template, identifier: template.identifier, layout: (layout && layout.virtual_path)) do
             content = template.render(view, locals) { |*name| view._layout_for(*name) }
             return content if ViewSourceMap.force_disabled?(locals)
 
             path = Pathname.new(template.identifier)
 
-            if @lookup_context.rendered_format == :html && path.file?
+            if template.format == :html && path.file?
               name = path.relative_path_from(Rails.root)
               "<!-- BEGIN #{name} -->\n#{content}<!-- END #{name} -->".html_safe
             else
